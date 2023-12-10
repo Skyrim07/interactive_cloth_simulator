@@ -1,0 +1,570 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alex Liu - Computer Graphics</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: left;
+            padding-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Alex Liu - Final Project</h3>
+    <h4>Cloth Simulation</h4>
+    <p>
+    Cloth simulation using WebGL. Something like <a href="https://aatishb.com/drape/">this.</a><div class=""></div></p>
+    Features include: Real-time mesh building, cloth physics (mass-spring system), cloth procedural texture rendering, and object collision.
+</p>
+<input type="checkbox" id="wireframeCheckbox" name="wireframeCheckbox" checked>
+<label for="wireframeCheckbox">Display Wireframe</label>
+
+<input type="checkbox" id="lightingCheckbox" name="lightingCheckbox" checked>
+<label for="lightingCheckbox">Lighting</label>
+
+<body bgcolor=orange>
+    <center>
+    <canvas id='canvas1' width=1500 height=900></canvas>
+    
+    <script>
+    let wireframeMode = true;
+    let enableLighting = true;
+
+
+    document.getElementById('wireframeCheckbox').addEventListener('change', function() {
+        wireframeMode = this.checked;
+    });
+    document.getElementById('lightingCheckbox').addEventListener('change', function() {
+        enableLighting = this.checked;
+    });
+
+    let mIdentity = () => [ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 ];
+    
+    let mInverse = m => {
+       let dst = [], det = 0, cofactor = (c, r) => {
+          let s = (i, j) => m[c+i & 3 | (r+j & 3) << 2];
+          return (c+r & 1 ? -1 : 1) * ( (s(1,1) * (s(2,2) * s(3,3) - s(3,2) * s(2,3)))
+                                      - (s(2,1) * (s(1,2) * s(3,3) - s(3,2) * s(1,3)))
+                                      + (s(3,1) * (s(1,2) * s(2,3) - s(2,2) * s(1,3))) );
+       }
+       for (let n = 0 ; n < 16 ; n++) dst.push(cofactor(n >> 2, n & 3));
+       for (let n = 0 ; n <  4 ; n++) det += m[n] * dst[n << 2]; 
+       for (let n = 0 ; n < 16 ; n++) dst[n] /= det;
+       return dst;
+    }
+    let matrixMultiply = (a, b) => {
+       let dst = [];
+       for (let n = 0 ; n < 16 ; n++)
+          dst.push(a[n&3]*b[n&12] + a[n&3|4]*b[n&12|1] + a[n&3|8]*b[n&12|2] + a[n&3|12]*b[n&12|3]);
+       return dst;
+    }
+    let mTranslate = (tx,ty,tz, m) => {
+       return matrixMultiply(m, [1,0,0,0, 0,1,0,0, 0,0,1,0, tx,ty,tz,1]);
+    }
+    let mRotateX = (theta, m) => {
+       let c = Math.cos(theta), s = Math.sin(theta);
+       return matrixMultiply(m, [1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+    }
+    let mRotateY = (theta, m) => {
+       let c = Math.cos(theta), s = Math.sin(theta);
+       return matrixMultiply(m, [c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+    }
+    let mRotateZ = (theta, m) => {
+       let c = Math.cos(theta), s = Math.sin(theta);
+       return matrixMultiply(m, [c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);
+    }
+    let mScale = (sx,sy,sz, m) => {
+       return matrixMultiply(m, [sx,0,0,0, 0,sy,0,0, 0,0,sz,0, 0,0,0,1]);
+    }
+    let mPerspective = (fl, m) => {
+       return matrixMultiply(m, [1,0,0,0, 0,1,0,0, 0,0,1,-1/fl, 0,0,0,1]);
+    }
+    
+    let start_gl = (canvas, vertexShader, fragmentShader) => {
+        let gl = canvas.getContext("webgl");
+        let program = gl.createProgram();
+        gl.program = program;
+
+        let addShader = (type, src) => {
+            let shader = gl.createShader(type);
+            gl.shaderSource(shader, src);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader compile error:", gl.getShaderInfoLog(shader));
+                return;
+            }
+            gl.attachShader(program, shader);
+        };
+
+        addShader(gl.VERTEX_SHADER, vertexShader);
+        addShader(gl.FRAGMENT_SHADER, fragmentShader);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error("Shader program link error:", gl.getProgramInfoLog(program));
+            return null;
+        }
+        gl.useProgram(program);
+
+        return gl;
+    };
+
+
+    let mouse = {
+        down: false,
+        x: 0,
+        y: 0
+    };
+
+    canvas1.addEventListener('mousedown', function(e) {
+        mouse.down = true;
+        updateMousePosition(e);
+        startDragVertex();
+    });
+
+    canvas1.addEventListener('mouseup', function(e) {
+        mouse.down = false;
+        endDragVertex();
+    });
+    canvas1.addEventListener('mouseout', function(e) {
+        mouse.down = false;
+        endDragVertex();
+    });
+
+
+    canvas1.addEventListener('mousemove', function(e) {
+        updateMousePosition(e);
+        if (mouse.down) {
+            dragVertex();
+        }
+    });
+
+    function updateMousePosition(e) {
+        var rect = canvas1.getBoundingClientRect();
+        mouse.x = e.clientX - rect.left;
+        mouse.y = e.clientY - rect.top;
+    }
+    
+    class Particle {
+        constructor(x, y, z) {
+            this.position = {x, y, z};
+            this.normal = {x: 0, y: 0, z: 0};
+            this.previous = {x, y, z};
+            this.acceleration = {x: 0, y: 0, z: 0};
+            this.mass = 1.5;
+            this.fixed = false;
+            this.damping = 0.98;
+        }
+
+        addForce(force) {
+            this.acceleration.x += force.x / this.mass;
+            this.acceleration.y += force.y / this.mass;
+            this.acceleration.z += force.z / this.mass;
+        }
+
+        integrate(timeStep) {
+            if (!this.fixed) {
+                var velocityX = (this.position.x - this.previous.x) * this.damping;
+                var velocityY = (this.position.y - this.previous.y) * this.damping;
+                var velocityZ = (this.position.z - this.previous.z) * this.damping;
+
+                this.previous.x = this.position.x;
+                this.previous.y = this.position.y;
+                this.previous.z = this.position.z;
+
+                this.position.x += velocityX + this.acceleration.x * timeStep * timeStep;
+                this.position.y += velocityY + this.acceleration.y * timeStep * timeStep;
+                this.position.z += velocityZ + this.acceleration.z * timeStep * timeStep;
+
+                this.acceleration.x = 0;
+                this.acceleration.y = 0;
+                this.acceleration.z = 0;
+            }
+        }
+    }
+
+
+
+    class Spring {
+        constructor(p1, p2, restLength) {
+            this.p1 = p1;
+            this.p2 = p2;
+            this.restLength = restLength;
+            this.stiffness = 0.3;
+        }
+
+        satisfy() {
+            var dx = this.p2.position.x - this.p1.position.x;
+            var dy = this.p2.position.y - this.p1.position.y;
+            var dz = this.p2.position.z - this.p1.position.z;
+
+            var distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            var displacement = distance - this.restLength;
+            var forceX = this.stiffness * displacement * (dx / distance);
+            var forceY = this.stiffness * displacement * (dy / distance);
+            var forceZ = this.stiffness * displacement * (dz / distance);
+
+            if (!this.p1.fixed) {
+                this.p1.position.x += forceX;
+                this.p1.position.y += forceY;
+                this.p1.position.z += forceZ;
+            }
+
+            if (!this.p2.fixed) {
+                this.p2.position.x -= forceX;
+                this.p2.position.y -= forceY;
+                this.p2.position.z -= forceZ;
+            }
+        }
+    }
+
+
+
+
+
+
+    let clothWidth = 10;
+    let clothHeight = 10;
+    let numParticlesX = 20;
+    let numParticlesY = 20;
+    let particles = [];
+
+    for (let y = 0; y < numParticlesY; y++) {
+        for (let x = 0; x < numParticlesX; x++) {
+            var particle = new Particle(x * clothWidth / numParticlesX, y * clothHeight / numParticlesY,0);
+            particles.push(particle);
+        }
+    }
+
+    const springs = [];
+    let restLength = clothWidth/numParticlesX-.1;
+    for (let y = 0; y < numParticlesY; y++) {
+        for (let x = 0; x < numParticlesX; x++) {
+            let current = y * numParticlesX + x;
+
+            if (x < numParticlesX - 1) {
+                let right = current + 1;
+                springs.push(new Spring(particles[current], particles[right], restLength));
+            }
+
+            if (y < numParticlesY - 1) {
+                let bottom = current + numParticlesX;
+                springs.push(new Spring(particles[current], particles[bottom], restLength));
+            }
+        }
+    }
+
+    function computeNormals(particles, numParticlesX, numParticlesY) {
+        let normals = new Array(particles.length).fill(0).map(() => ({x: 0, y: 0, z: 0}));
+
+        for (let y = 0; y < numParticlesY - 1; y++) {
+            for (let x = 0; x < numParticlesX - 1; x++) {
+                let i1 = y * numParticlesX + x;
+                let i2 = i1 + 1;
+                let i3 = i1 + numParticlesX;
+                let i4 = i3 + 1;
+
+                let p1 = particles[i1].position;
+                let p2 = particles[i2].position;
+                let p3 = particles[i3].position;
+                let p4 = particles[i4].position;
+
+                let normal1 = computeTriangleNormal(p1, p2, p3);
+                let normal2 = computeTriangleNormal(p2, p4, p3);
+
+                [i1, i2, i3, i4].forEach((index) => {
+                    normals[index].x += normal1.x + normal2.x;
+                    normals[index].y += normal1.y + normal2.y;
+                    normals[index].z += normal1.z + normal2.z;
+                });
+            }
+        }
+
+        for (let i = 0; i < normals.length; i++) {
+            let len = Math.sqrt(normals[i].x * normals[i].x + normals[i].y * normals[i].y + normals[i].z * normals[i].z);
+            particles[i].normal.x = normals[i].x / len;
+            particles[i].normal.y = normals[i].y / len;
+            particles[i].normal.z = normals[i].z / len;
+        }
+    }
+
+
+    function computeTriangleNormal(p1, p2, p3) {
+        let v1 = {x: p2.x - p1.x, y: p2.y - p1.y, z: p2.z - p1.z};
+        let v2 = {x: p3.x - p1.x, y: p3.y - p1.y, z: p3.z - p1.z};
+
+        return {
+            x: v1.y * v2.z - v1.z * v2.y,
+            y: v1.z * v2.x - v1.x * v2.z,
+            z: v1.x * v2.y - v1.y * v2.x
+        };
+    }
+
+
+    let vertexShader = `
+       attribute vec3 aPos, aNor;
+       uniform mat4 uMatrix, uInvMatrix;
+       varying vec3 vPos, vNor;
+       void main() {
+          vec4 pos = uMatrix * vec4(aPos, 1.0);
+          vec4 nor = vec4(aNor, 0.0) * uInvMatrix;
+          vPos = pos.xyz;
+          vNor = nor.xyz;
+          gl_Position = pos * vec4(1.,1.,-.1,1.);
+       }
+    `;
+    let fragmentShader = `
+    precision mediump float;
+    uniform vec3 uLightPos;
+    uniform vec3 uViewPos;
+    uniform vec3 uColor;
+    uniform int uLighting;
+    varying vec3 vPos, vNor;
+
+    void main(void) {
+        float ambientStrength = 0.5;
+        vec3 ambient = ambientStrength * uColor;
+
+        vec3 norm = normalize(vNor);
+        vec3 lightDir = normalize(uLightPos - vPos);
+        float diff = max(dot(norm, lightDir), 0.0);
+        vec3 diffuse = diff * uColor * .5;
+
+        float specularStrength = 0.5;
+        vec3 viewDir = normalize(uViewPos - vPos);
+        vec3 reflectDir = reflect(-lightDir, norm);  
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+        vec3 specular = specularStrength * spec * uColor;
+
+        vec3 result = (ambient + diffuse) * uColor;
+        if(uLighting == 0)
+            result = uColor;
+        gl_FragColor = vec4(result, 1.0);
+    }
+
+    `;
+
+    let gl = start_gl(canvas1, vertexShader, fragmentShader);
+    let uMatrixLocation = gl.getUniformLocation(gl.program, "uMatrix");
+    let uInvMatrixLocation = gl.getUniformLocation(gl.program, "uInvMatrix");
+    let uColorLocation = gl.getUniformLocation(gl.program, "uColor");
+    let uLightPosLocation = gl.getUniformLocation(gl.program, "uLightPos");
+    let uLightingLocation = gl.getUniformLocation(gl.program, "uLighting");
+
+    let clothVertexBuffer;
+    function setupClothVertexBuffer() {
+        clothVertexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, clothVertexBuffer);
+
+        let maxVertices = Math.max(
+            (numParticlesX - 1) * (numParticlesY - 1) * 6,
+            2 * (numParticlesX * (numParticlesY - 1) + numParticlesY * (numParticlesX - 1))
+        );
+
+        gl.bufferData(gl.ARRAY_BUFFER, maxVertices * 6 * 4, gl.DYNAMIC_DRAW);
+    }
+
+    function updateClothBuffer() {
+        let vertices = [];
+        for (let y = 0; y < numParticlesY - 1; y++) {
+            for (let x = 0; x < numParticlesX - 1; x++) {
+                let i1 = y * numParticlesX + x;
+                let i2 = i1 + 1;
+                let i3 = i1 + numParticlesX;
+                let i4 = i3 + 1;
+
+                addVertex(particles[i1], vertices);
+                addVertex(particles[i2], vertices);
+                addVertex(particles[i3], vertices);
+
+                addVertex(particles[i2], vertices);
+                addVertex(particles[i4], vertices);
+                addVertex(particles[i3], vertices);
+            }
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, clothVertexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
+    }
+
+
+    function addVertex(particle, vertices) {
+        vertices.push(particle.position.x, particle.position.y, particle.position.z,
+                    particle.normal.x, particle.normal.y, particle.normal.z);
+    }
+
+
+    function updateClothBufferForWireframe() {
+        let vertices = [];
+        for (let y = 0; y < numParticlesY; y++) {
+            for (let x = 0; x < numParticlesX; x++) {
+                let i = y * numParticlesX + x;
+
+                if (x < numParticlesX - 1) {
+                    addVertex(particles[i], vertices);
+                    addVertex(particles[i + 1], vertices);
+                }
+
+                if (y < numParticlesY - 1) {
+                    addVertex(particles[i], vertices);
+                    addVertex(particles[i + numParticlesX], vertices);
+                }
+            }
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, clothVertexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
+    }
+
+
+    function setAttributePointers(gl) {
+        let vertexSize = 6 * Float32Array.BYTES_PER_ELEMENT;
+        let normalOffset = 3 * Float32Array.BYTES_PER_ELEMENT;
+
+        gl.vertexAttribPointer(gl.getAttribLocation(gl.program, "aPos"), 3, gl.FLOAT, false, vertexSize, 0);
+        gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aPos"));
+
+        gl.vertexAttribPointer(gl.getAttribLocation(gl.program, "aNor"), 3, gl.FLOAT, false, vertexSize, normalOffset);
+        gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aNor"));
+    }
+
+    let m = mIdentity();
+    function render() {
+        computeNormals(particles, numParticlesX, numParticlesY);
+        updateClothBuffer();
+
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.useProgram(gl.program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, clothVertexBuffer);
+        setAttributePointers(gl);
+
+        let color = [1,.9,.6];
+        m = mIdentity();
+        m = mPerspective(3, m);
+        let size = 0.15;
+        m = mScale(size*.67,size,size, m);
+        m = mTranslate(-5,-2,-5, m);
+
+
+        let lightPos = [0.5, 1.0, 1.0];
+        gl.uniform3fv      (uColorLocation    , color);
+        gl.uniform3fv      (uLightPosLocation    , lightPos);
+        gl.uniformMatrix4fv(uMatrixLocation   , false, m);
+        gl.uniformMatrix4fv(uInvMatrixLocation, false, mInverse(m));
+        gl.uniform1i       (uLightingLocation, enableLighting?1:0);
+        
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.drawArrays(gl.TRIANGLES, 0, (numParticlesX - 1) * (numParticlesY - 1) * 6); 
+      
+        if(wireframeMode){
+        updateClothBufferForWireframe();
+        color = [0.1, 0.1, 0.1];
+        gl.uniform3fv(uColorLocation, color);
+        gl.disable(gl.DEPTH_TEST);
+        gl.drawArrays(gl.LINES, 0, (numParticlesX - 1) * (numParticlesY - 1) * 4.21);
+        }
+    }
+
+    let selectedParticle = null;
+    function screenToNDC(mx, my) {
+        return {
+            x: ((mx / canvas1.width) * 2 - 1)*.85,
+            y: (1 - (my / canvas1.height) * 2)*.85
+        };
+    }
+    function mouseToWorld(mx, my) {
+        let ndc = screenToNDC(mx, my);
+        let pointNDC = [ndc.x, ndc.y, -1, 1]; 
+
+        let inverseProjection = mInverse(m);
+        let pointWorld = matrixMultiply(inverseProjection, pointNDC);
+
+        pointWorld = [
+            pointWorld[0] / pointWorld[3],
+            pointWorld[1] / pointWorld[3],
+            pointWorld[2] / pointWorld[3]
+        ];
+
+        return { x: pointWorld[0], y: pointWorld[1], z: pointWorld[2] };
+    }
+    function distance(mouse, particlePosition) {
+        let wpos = mouseToWorld(mouse.x, mouse.y);
+        let x = wpos.x - particlePosition.x;
+        let y = wpos.y - particlePosition.y;
+        let z = wpos.z - particlePosition.z;
+        return Math.sqrt(x*x+y*y+z*z);
+    }
+    function startDragVertex() {
+        if (!selectedParticle && mouse.down) {
+            let minDist = Infinity;
+            for (let particle of particles) {
+                let dist = distance(mouse, particle.position);
+                if (dist < minDist) {
+                    minDist = dist;
+                    selectedParticle = particle;
+                }
+            }
+        }
+        selectedParticle.fixed = true;
+    }
+    function endDragVertex() {
+        if (selectedParticle)
+        selectedParticle.fixed = false;
+        selectedParticle = null;
+    }
+    function dragVertex() {
+        if (selectedParticle) {
+            let wpos = mouseToWorld(mouse.x, mouse.y);
+            selectedParticle.position.x = wpos.x;
+            selectedParticle.position.y = wpos.y;
+            selectedParticle.position.z = 1;
+        }
+    }
+
+    let windForce = {x: 0.5, y: 0, z: 0.5};
+    function updateWind() {
+        let time = Date.now() * 0.001;
+        windForce.x = 0;
+        windForce.y = 0;
+        windForce.z = 0;
+    }
+
+    function update(timeStep) {
+        particles[numParticlesX*numParticlesX-1].fixed = true; // Fix point
+        particles[numParticlesX*numParticlesX-numParticlesX].fixed = true; // Fix point
+
+
+        var gravity = {x: 0, y: -18, z: 0};
+        for (let i = 0; i < particles.length; i++) {
+            particles[i].addForce(gravity);
+            particles[i].addForce(windForce);
+            particles[i].integrate(timeStep);
+        }
+
+        for(let x=0;x<2;x++){
+            for (let i = 0; i < springs.length; i++) {
+                springs[i].satisfy();
+            }
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        updateWind();
+        update(0.016);
+        render();
+    }
+
+    function startAnimation() {
+        setupClothVertexBuffer();
+        animate();
+    }
+
+    startAnimation();
+    </script>
+</body>
+</html>
