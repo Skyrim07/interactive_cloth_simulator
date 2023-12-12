@@ -403,13 +403,13 @@
             for (let x = 0; x < numParticlesX; x++) {
                 let i = y * numParticlesX + x;
 
-                if (x < numParticlesX - 1) {
-                    addVertex(particles[i], vertices);
-                    addVertex(particles[i + 1], vertices);
+                if (x < numParticlesX -1) {
+                    addVertex(particles[i], vertices);    
+                    addVertex(particles[i + 1], vertices); 
                 }
 
                 if (y < numParticlesY - 1) {
-                    addVertex(particles[i], vertices);
+                    addVertex(particles[i], vertices); 
                     addVertex(particles[i + numParticlesX], vertices);
                 }
             }
@@ -418,6 +418,8 @@
         gl.bindBuffer(gl.ARRAY_BUFFER, clothVertexBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
     }
+
+
 
 
     function setAttributePointers(gl) {
@@ -465,7 +467,8 @@
         color = [0.1, 0.1, 0.1];
         gl.uniform3fv(uColorLocation, color);
         gl.disable(gl.DEPTH_TEST);
-        gl.drawArrays(gl.LINES, 0, (numParticlesX - 1) * (numParticlesY - 1) * 4.21);
+        let totalVertices = (numParticlesY * (numParticlesX - 1) * 2) + (numParticlesX * (numParticlesY - 1) * 2);
+        gl.drawArrays(gl.LINES, 0, totalVertices);
         }
     }
 
