@@ -114,23 +114,41 @@
 
     let mouse = {
         down: false,
+        downRight: false,
         x: 0,
         y: 0
     };
-
+    canvas1.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
     canvas1.addEventListener('mousedown', function(e) {
-        mouse.down = true;
-        updateMousePosition(e);
-        startDragVertex();
+        if(e.button == 0){
+            mouse.down = true;
+            updateMousePosition(e);
+            startDragVertex();
+        }
+        if(e.button == 2){
+            mouse.downRight = true;
+        }
     });
 
     canvas1.addEventListener('mouseup', function(e) {
-        mouse.down = false;
-        endDragVertex();
+        if(e.button==0){
+            mouse.down = false;
+            endDragVertex();
+        }
+        if(e.button == 2){
+            mouse.downRight = false;
+        }
     });
     canvas1.addEventListener('mouseout', function(e) {
-        mouse.down = false;
-        endDragVertex();
+        if(e.button==0){
+            mouse.down = false;
+            endDragVertex();
+        }
+        if(e.button == 2){
+            mouse.downRight = false;
+        }
     });
 
 
@@ -138,6 +156,9 @@
         updateMousePosition(e);
         if (mouse.down) {
             dragVertex();
+        }
+        if(mouse.downRight){
+            dragObject();
         }
     });
 
@@ -324,6 +345,14 @@
     uniform int uLighting;
     varying vec3 vPos, vNor;
 
+    float noise(vec3 point) { float r = 0.; for (int i=0;i<16;i++) {
+    vec3 D, p = point + mod(vec3(i,i/4,i/8) , vec3(4.0,2.0,2.0)) +
+        1.7*sin(vec3(i,5*i,8*i)), C=floor(p), P=p-C-.5, A=abs(P);
+    C += mod(C.x+C.y+C.z,2.) * step(max(A.yzx,A.zxy),A) * sign(P);
+    D=34.*sin(987.*float(i)+876.*C+76.*C.yzx+765.*C.zxy);P=p-C-.5;
+    r+=sin(6.3*dot(P,fract(D)-.5))*pow(max(0.,1.-2.*dot(P,P)),4.);
+    } return .5 * sin(r); }
+
     void main(void) {
         float ambientStrength = 0.5;
         vec3 ambient = ambientStrength * uColor;
@@ -342,6 +371,7 @@
         vec3 result = (ambient + diffuse) * uColor;
         if(uLighting == 0)
             result = uColor;
+       
         gl_FragColor = vec4(result, 1.0);
     }
 
@@ -434,6 +464,7 @@
     }
 
     let m = mIdentity();
+    let rotation = 0;
     function render() {
         computeNormals(particles, numParticlesX, numParticlesY);
         updateClothBuffer();
@@ -526,6 +557,10 @@
             selectedParticle.position.y = wpos.y;
             selectedParticle.position.z = 1;
         }
+    }
+
+    function dragObject(){
+        rotation+=0.01;
     }
 
     let windForce = {x: 0.5, y: 0, z: 0.5};
