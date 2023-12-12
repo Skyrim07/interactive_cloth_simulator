@@ -169,9 +169,10 @@
     }
     
     class Particle {
-        constructor(x, y, z) {
+        constructor(x, y, z, u, v) {
             this.position = {x, y, z};
             this.normal = {x: 0, y: 0, z: 0};
+            this.uv = {u, v};
             this.previous = {x, y, z};
             this.acceleration = {x: 0, y: 0, z: 0};
             this.mass = 1.5;
@@ -255,7 +256,9 @@
 
     for (let y = 0; y < numParticlesY; y++) {
         for (let x = 0; x < numParticlesX; x++) {
-            var particle = new Particle(x * clothWidth / numParticlesX, y * clothHeight / numParticlesY,0);
+            let u = x / (numParticlesX - 1);
+            let v = y / (numParticlesY - 1);
+            var particle = new Particle(x * clothWidth / numParticlesX, y * clothHeight / numParticlesY, 0, u, v);
             particles.push(particle);
         }
     }
@@ -327,13 +330,16 @@
 
     let vertexShader = `
        attribute vec3 aPos, aNor;
+       attribute vec2 aUV;
        uniform mat4 uMatrix, uInvMatrix;
        varying vec3 vPos, vNor;
+       varying vec2 vUV;
        void main() {
           vec4 pos = uMatrix * vec4(aPos, 1.0);
           vec4 nor = vec4(aNor, 0.0) * uInvMatrix;
           vPos = pos.xyz;
           vNor = nor.xyz;
+          vUV = aUV;
           gl_Position = pos * vec4(1.,1.,-.1,1.);
        }
     `;
@@ -344,6 +350,7 @@
     uniform vec3 uColor;
     uniform int uLighting;
     varying vec3 vPos, vNor;
+    varying vec2 vUV;
 
     float noise(vec3 point) { float r = 0.; for (int i=0;i<16;i++) {
     vec3 D, p = point + mod(vec3(i,i/4,i/8) , vec3(4.0,2.0,2.0)) +
@@ -372,6 +379,7 @@
         if(uLighting == 0)
             result = uColor;
        
+        result+=noise(vec3(vUV * 5., 1.)) * .1;
         gl_FragColor = vec4(result, 1.0);
     }
 
@@ -423,7 +431,8 @@
 
     function addVertex(particle, vertices) {
         vertices.push(particle.position.x, particle.position.y, particle.position.z,
-                    particle.normal.x, particle.normal.y, particle.normal.z);
+                    particle.normal.x, particle.normal.y, particle.normal.z,
+                    particle.uv.u, particle.uv.v);
     }
 
 
@@ -453,14 +462,18 @@
 
 
     function setAttributePointers(gl) {
-        let vertexSize = 6 * Float32Array.BYTES_PER_ELEMENT;
+        let vertexSize = 8 * Float32Array.BYTES_PER_ELEMENT;
         let normalOffset = 3 * Float32Array.BYTES_PER_ELEMENT;
+        let uvOffset = 6 * Float32Array.BYTES_PER_ELEMENT;
 
         gl.vertexAttribPointer(gl.getAttribLocation(gl.program, "aPos"), 3, gl.FLOAT, false, vertexSize, 0);
         gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aPos"));
 
         gl.vertexAttribPointer(gl.getAttribLocation(gl.program, "aNor"), 3, gl.FLOAT, false, vertexSize, normalOffset);
         gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aNor"));
+
+        gl.vertexAttribPointer(gl.getAttribLocation(gl.program, "aUV"), 2, gl.FLOAT, false, vertexSize, uvOffset);
+        gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aUV"));
     }
 
     let m = mIdentity();
