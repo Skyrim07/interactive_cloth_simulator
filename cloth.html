@@ -13,25 +13,35 @@
     </style>
 </head>
 <body>
-    <h3>Alex Liu - Final Project</h3>
-    <h4>Cloth Simulation</h4>
+    <h3>Alex Liu - Cloth Simulation</h3>
     <p>
-    Cloth simulation using WebGL. Something like <a href="https://aatishb.com/drape/">this.</a><div class=""></div></p>
     Features include: Real-time mesh building, cloth physics (mass-spring system), cloth procedural texture rendering, and object collision.
 </p>
-<input type="checkbox" id="wireframeCheckbox" name="wireframeCheckbox" checked>
+<input type="checkbox" id="wireframeCheckbox" name="wireframeCheckbox">
 <label for="wireframeCheckbox">Display Wireframe</label>
 
 <input type="checkbox" id="lightingCheckbox" name="lightingCheckbox" checked>
 <label for="lightingCheckbox">Lighting</label>
 
+<input type="checkbox" id="fixCheckbox" name="fixCheckbox">
+<label for="fixCheckbox">Fix Bottom</label>
+<br>
+<br>
+<label for="sphereSizeSlider">Sphere Size:</label>
+<input type="range" id="sphereSizeSlider" name="sphereSize" min="0.5" max="3" step="0.1" value="1">
+<br>
+<br>
+<label for="windXSlider">Wind Force:</label>
+<input type="range" id="windXSlider" min="0" max="12" step="0.1" value="0.2">
 <body bgcolor=orange>
     <center>
     <canvas id='canvas1' width=1500 height=900></canvas>
     
     <script>
-    let wireframeMode = true;
+    let wireframeMode = false;
     let enableLighting = true;
+    let fixBottom = false;
+    let sphereSizeMul = 1;
 
 
     document.getElementById('wireframeCheckbox').addEventListener('change', function() {
@@ -40,7 +50,15 @@
     document.getElementById('lightingCheckbox').addEventListener('change', function() {
         enableLighting = this.checked;
     });
-
+    document.getElementById('fixCheckbox').addEventListener('change', function() {
+        fixBottom = this.checked;
+    });
+    document.getElementById('sphereSizeSlider').addEventListener('input', function(event) {
+        sphereSizeMul= parseFloat(event.target.value);
+        });
+    document.getElementById('windXSlider').addEventListener('input', function(event) {
+        windForceV = parseFloat(event.target.value);
+    });
     let mIdentity = () => [ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 ];
     
     let mInverse = m => {
@@ -250,8 +268,8 @@
 
     let clothWidth = 10;
     let clothHeight = 10;
-    let numParticlesX = 20;
-    let numParticlesY = 20;
+    let numParticlesX = 25;
+    let numParticlesY = 25;
     let particles = [];
 
     for (let y = 0; y < numParticlesY; y++) {
@@ -332,24 +350,26 @@
        attribute vec3 aPos, aNor;
        attribute vec2 aUV;
        uniform mat4 uMatrix, uInvMatrix;
-       varying vec3 vPos, vNor;
+       varying vec3 vPos, vNor, vaPos;
        varying vec2 vUV;
        void main() {
           vec4 pos = uMatrix * vec4(aPos, 1.0);
           vec4 nor = vec4(aNor, 0.0) * uInvMatrix;
           vPos = pos.xyz;
+          vaPos = aPos.xyz;
           vNor = nor.xyz;
           vUV = aUV;
           gl_Position = pos * vec4(1.,1.,-.1,1.);
        }
     `;
     let fragmentShader = `
-    precision mediump float;
+    precision highp float;
     uniform vec3 uLightPos;
     uniform vec3 uViewPos;
     uniform vec3 uColor;
     uniform int uLighting;
-    varying vec3 vPos, vNor;
+    uniform int isSphere;
+    varying vec3 vPos, vNor,vaPos;
     varying vec2 vUV;
 
     float noise(vec3 point) { float r = 0.; for (int i=0;i<16;i++) {
@@ -360,30 +380,161 @@
     r+=sin(6.3*dot(P,fract(D)-.5))*pow(max(0.,1.-2.*dot(P,P)),4.);
     } return .5 * sin(r); }
 
+    float knit(vec2 uv, float lineWidth, float offset, bool doubleLine) {
+        float col = 0.0;
+        for(float i = 0.0; i < 2.0; i += 0.7){
+            float x = mod(i, 0.7 * 2.0);
+            if (doubleLine){
+                if (x == 0.0){
+                    col += 1.0 - step(lineWidth, abs(uv.x - i - offset));
+                    col += 1.0 - step(lineWidth, abs(uv.y - i + offset)); 
+                } else{
+                    col += 1.0 - step(lineWidth, abs(uv.x - i + offset));
+                    col += 1.0 - step(lineWidth, abs(uv.y - i - offset));
+                }              
+            } 
+            else{
+                col += 1.0 - step(lineWidth, abs(uv.x - i*2.0 - offset)); 
+                col += 1.0 - step(lineWidth, abs(uv.y - i*2.0 + offset));
+            }
+        }
+        return col;
+    }
+
+
     void main(void) {
-        float ambientStrength = 0.5;
+        float ambientStrength = 0.2;
         vec3 ambient = ambientStrength * uColor;
 
         vec3 norm = normalize(vNor);
         vec3 lightDir = normalize(uLightPos - vPos);
         float diff = max(dot(norm, lightDir), 0.0);
-        vec3 diffuse = diff * uColor * .5;
+        diff = smoothstep(0.,1.,diff);
+        vec3 diffuse = diff * uColor * .8;
 
         float specularStrength = 0.5;
         vec3 viewDir = normalize(uViewPos - vPos);
         vec3 reflectDir = reflect(-lightDir, norm);  
+        if(isSphere == 1)
+            viewDir = -viewDir;
         float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
-        vec3 specular = specularStrength * spec * uColor;
+        vec3 specular = specularStrength * spec * uColor * .4;
 
-        vec3 result = (ambient + diffuse) * uColor;
+        vec3 col = uColor;
+        if(isSphere == 0){
+            vec4 lightred = vec4(198.0/255.0, 23.0/255.0, 36.0/255.0, 0.5);
+            vec4 darkRed = vec4(120.0/255.0, 12.0/255.0, 46.0/255.0, 1.0); 
+            vec4 yellow = vec4(185.0/255.0, 166.0/255.0, 59.0/255.0, 1.0);
+            vec4 white = vec4(242.0/255.0, 242.0/255.0, 203.0/255.0, 0.1);
+            vec4 blue = vec4(5.0/255.0, 77.0/255.0, 175.0/255.0, 0.1); 
+            vec4 purp = vec4(42.0/255.0, 1.0/255.0, 56.0/255.0, 0.1); 
+            vec4 pixel = lightred;
+            pixel = mix(pixel, darkRed, knit(vUV, 0.15, 0.0, true));
+            pixel = mix(pixel, white, knit(vUV, 0.01, 0.005, true));
+            pixel = mix(pixel, white, knit(vUV, 0.01, -0.35, false)); 
+            pixel = mix(pixel, purp, knit(vUV, 0.01, -0.4, false)); 
+            pixel = mix(pixel, purp, knit(vUV, 0.01, -0.3, false));
+            pixel = mix(pixel, blue, knit(vUV, 0.02, 0.15, true));
+            pixel = mix(pixel, yellow, knit(vUV, 0.01, 0.05, true));
+            float stripe = fract( dot(vUV, vec2(75,-60)));
+            pixel = mix(pixel, lightred, stripe);
+            col= pixel.rgb;
+        }
+        else{
+            col += max(0.,dot(norm, vec3(0.,0.,1.))*.3);
+        }
+        vec3 result = (ambient + diffuse+specular) * col;
         if(uLighting == 0)
-            result = uColor;
-       
-        result+=noise(vec3(vUV * 5., 1.)) * .1;
+            result = col;
+        if(isSphere == 0){
+            result+=noise(vec3(vUV * 5., 1.)) * .1;
+            result = mix(result,result*smoothstep(0.,.1,vUV.x), .1);
+            result = mix(result,result*smoothstep(1.,.9,vUV.x), .1);
+            result = mix(result,result*smoothstep(0.,.1,vUV.y), .05);
+            result = mix(result,result*smoothstep(1.,.9,vUV.y), .05);
+        }
         gl_FragColor = vec4(result, 1.0);
     }
 
     `;
+
+
+    function createSphereGeometry(radius, segments) {
+        let positions = [];
+        let normals = [];
+        let indices = [];
+
+        for (let latNumber = 0; latNumber <= segments; latNumber++) {
+            let theta = latNumber * Math.PI / segments;
+            let sinTheta = Math.sin(theta);
+            let cosTheta = Math.cos(theta);
+
+            for (let longNumber = 0; longNumber <= segments; longNumber++) {
+                let phi = longNumber * 2 * Math.PI / segments;
+                let sinPhi = Math.sin(phi);
+                let cosPhi = Math.cos(phi);
+
+                let x = cosPhi * sinTheta;
+                let y = cosTheta;
+                let z = sinPhi * sinTheta;
+
+                positions.push(radius * x);
+                positions.push(radius * y);
+                positions.push(radius * z);
+
+                normals.push(x);
+                normals.push(y);
+                normals.push(z);
+            }
+        }
+        for (let latNumber = 0; latNumber < segments; latNumber++) {
+            for (let longNumber = 0; longNumber < segments; longNumber++) {
+                let first = (latNumber * (segments + 1)) + longNumber;
+                let second = first + segments + 1;
+
+                indices.push(first);
+                indices.push(first + 1);
+                indices.push(second);
+
+                indices.push(second);
+                indices.push(first + 1);
+                indices.push(second + 1);
+            }
+        }
+
+
+        return { positions, normals, indices };
+    }
+    let sphere = {
+        center: { x: 0, y: 0, z: -0.5 }, 
+        radius: .4,                  
+        velocity: { x: 0, y: 0, z: 0 }
+    };
+    let sphereGeometry = createSphereGeometry(sphere.radius, 16);
+    function checkCollision(particle, sphere) {
+        let radius = sphere.radius *2.75 *sphereSizeMul;
+        let dx = particle.position.x - (sphere.center.x + 5);
+        let dy = particle.position.y - (sphere.center.y + 2);
+        let dz = particle.position.z - (sphere.center.z +0.6);
+        dz*=.5;
+        let distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (distance < radius) {
+
+            let penetrationDepth = radius - distance;
+
+            let collisionNormal = {
+                x: dx / distance,
+                y: dy / distance,
+                z: dz / distance
+            };
+            particle.position.x += collisionNormal.x * penetrationDepth;
+            particle.position.y += collisionNormal.y * penetrationDepth;
+            particle.position.z += collisionNormal.z * penetrationDepth;
+        }
+    }
+
+
 
     let gl = start_gl(canvas1, vertexShader, fragmentShader);
     let uMatrixLocation = gl.getUniformLocation(gl.program, "uMatrix");
@@ -391,6 +542,7 @@
     let uColorLocation = gl.getUniformLocation(gl.program, "uColor");
     let uLightPosLocation = gl.getUniformLocation(gl.program, "uLightPos");
     let uLightingLocation = gl.getUniformLocation(gl.program, "uLighting");
+    let uSphereLocation = gl.getUniformLocation(gl.program, "isSphere");
 
     let clothVertexBuffer;
     function setupClothVertexBuffer() {
@@ -476,13 +628,56 @@
         gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aUV"));
     }
 
+
+    function renderSphere(gl, sphere, sphereGeometry) {
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        let positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereGeometry.positions), gl.STATIC_DRAW);
+
+        let indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphereGeometry.indices), gl.STATIC_DRAW);
+
+        gl.vertexAttribPointer(gl.getAttribLocation(gl.program, "aPos"), 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aPos"));
+        
+        gl.vertexAttribPointer(gl.getAttribLocation(gl.program, "aNor"), 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(gl.getAttribLocation(gl.program, "aNor"));
+
+        let modelMatrix = mIdentity();
+        modelMatrix = mPerspective(3, modelMatrix);
+        modelMatrix = mTranslate(sphere.center.x, sphere.center.y, sphere.center.z, modelMatrix);
+        modelMatrix = mScale(sphere.radius*.67, sphere.radius, sphere.radius, modelMatrix);
+        modelMatrix = mScale(sphereSizeMul,sphereSizeMul,sphereSizeMul,modelMatrix);
+        let color = [.6,.8,.9];
+        let lightPos = [2.5, 2.0,1.0];
+        gl.uniform3fv      (uColorLocation    , color);
+        gl.uniform3fv      (uLightPosLocation    , lightPos);
+        
+        gl.uniformMatrix4fv(uMatrixLocation, false, modelMatrix);
+        gl.uniformMatrix4fv(uInvMatrixLocation, false, mInverse(modelMatrix));
+        gl.uniform1i       (uSphereLocation, 1);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.drawElements(gl.TRIANGLES, sphereGeometry.indices.length, gl.UNSIGNED_SHORT, 0);
+
+        gl.deleteBuffer(positionBuffer);
+        gl.deleteBuffer(indexBuffer);
+    }
+
+
     let m = mIdentity();
     let rotation = 0;
     function render() {
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        renderSphere(gl, sphere, sphereGeometry);
+
         computeNormals(particles, numParticlesX, numParticlesY);
         updateClothBuffer();
-
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+   
         gl.useProgram(gl.program);
         gl.bindBuffer(gl.ARRAY_BUFFER, clothVertexBuffer);
         setAttributePointers(gl);
@@ -495,13 +690,14 @@
         m = mTranslate(-5,-2,-5, m);
 
 
-        let lightPos = [0.5, 1.0, 1.0];
+        let lightPos = [0.5, 1.0, 3.0];
         gl.uniform3fv      (uColorLocation    , color);
         gl.uniform3fv      (uLightPosLocation    , lightPos);
         gl.uniformMatrix4fv(uMatrixLocation   , false, m);
         gl.uniformMatrix4fv(uInvMatrixLocation, false, mInverse(m));
         gl.uniform1i       (uLightingLocation, enableLighting?1:0);
-        
+        gl.uniform1i       (uSphereLocation, 0);
+
         gl.enable(gl.DEPTH_TEST);
         gl.depthFunc(gl.LEQUAL);
         gl.drawArrays(gl.TRIANGLES, 0, (numParticlesX - 1) * (numParticlesY - 1) * 6); 
@@ -514,6 +710,7 @@
         let totalVertices = (numParticlesY * (numParticlesX - 1) * 2) + (numParticlesX * (numParticlesY - 1) * 2);
         gl.drawArrays(gl.LINES, 0, totalVertices);
         }
+
     }
 
     let selectedParticle = null;
@@ -543,7 +740,7 @@
         let x = wpos.x - particlePosition.x;
         let y = wpos.y - particlePosition.y;
         let z = wpos.z - particlePosition.z;
-        return Math.sqrt(x*x+y*y+z*z);
+        return Math.sqrt(x*x+y*y);
     }
     function startDragVertex() {
         if (!selectedParticle && mouse.down) {
@@ -568,7 +765,7 @@
             let wpos = mouseToWorld(mouse.x, mouse.y);
             selectedParticle.position.x = wpos.x;
             selectedParticle.position.y = wpos.y;
-            selectedParticle.position.z = 1;
+            selectedParticle.position.z = 1.5;
         }
     }
 
@@ -577,17 +774,21 @@
     }
 
     let windForce = {x: 0.5, y: 0, z: 0.5};
+    let windForceV = 1;
     function updateWind() {
         let time = Date.now() * 0.001;
-        windForce.x = 0;
-        windForce.y = 0;
-        windForce.z = 0;
+        windForce.x = Math.sin(time) * windForceV * 1.5;
+        windForce.z = Math.min(windForce.z, 0.5);
     }
-
+    let iteration = 2;
+    let t = 0;
     function update(timeStep) {
+        t+=timeStep;
         particles[numParticlesX*numParticlesX-1].fixed = true; // Fix point
         particles[numParticlesX*numParticlesX-numParticlesX].fixed = true; // Fix point
 
+        particles[0].fixed = fixBottom; 
+        particles[numParticlesX-1].fixed = fixBottom; 
 
         var gravity = {x: 0, y: -18, z: 0};
         for (let i = 0; i < particles.length; i++) {
@@ -596,17 +797,22 @@
             particles[i].integrate(timeStep);
         }
 
-        for(let x=0;x<2;x++){
+        for(let x=0;x<iteration;x++){
             for (let i = 0; i < springs.length; i++) {
                 springs[i].satisfy();
             }
         }
+        if(t>.2)
+        for (let particle of particles) {
+            checkCollision(particle, sphere);
+        }
     }
-
+    let updateTime = 0.10;
     function animate() {
         requestAnimationFrame(animate);
         updateWind();
-        update(0.016);
+        update(updateTime);
+        updateTime = 0.016;
         render();
     }
 
