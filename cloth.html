@@ -15,7 +15,7 @@
 <body>
     <h3>Alex Liu - Cloth Simulation</h3>
     <p>
-    Features include: Real-time mesh building, cloth physics (mass-spring system), cloth procedural texture rendering, and object collision.
+    Features include: <b>Real-time mesh building</b> (verts, tris, normals, uvs), <b>cloth physics</b> (mass-spring system), <b>procedural texture rendering</b> (cloth, sphere), and <b>object collision</b>.
 </p>
 <input type="checkbox" id="wireframeCheckbox" name="wireframeCheckbox">
 <label for="wireframeCheckbox">Display Wireframe</label>
@@ -29,10 +29,12 @@
 <br>
 <label for="sphereSizeSlider">Sphere Size:</label>
 <input type="range" id="sphereSizeSlider" name="sphereSize" min="0.5" max="3" step="0.1" value="1">
-<br>
-<br>
 <label for="windXSlider">Wind Force:</label>
-<input type="range" id="windXSlider" min="0" max="12" step="0.1" value="0.2">
+<input type="range" id="windXSlider" min="0" max="18" step="0.1" value="0.2">
+<label for="colorBG">Cloth Color:</label>
+<input type="color" id="colorBG" value="#b0454c">
+<label for="colorStripe">Stripe Color:</label>
+<input type="color" id="colorStripe" value="#780c2e">
 <body bgcolor=orange>
     <center>
     <canvas id='canvas1' width=1500 height=900></canvas>
@@ -42,7 +44,15 @@
     let enableLighting = true;
     let fixBottom = false;
     let sphereSizeMul = 1;
-
+    let clothColorCG = [176.0/255.0, 69.0/255.0, 76.0/255.0];
+    let clothColorStripe = [120.0/255.0, 12.0/255.0, 46.0/255.0];
+    function hexToFloat3(hex) {
+        hex = hex.slice(1);
+        let r = parseInt(hex.slice(0, 2), 16);
+        let g = parseInt(hex.slice(2, 4), 16);
+        let b = parseInt(hex.slice(4, 6), 16);
+        return [r / 255, g / 255, b / 255];
+    }
 
     document.getElementById('wireframeCheckbox').addEventListener('change', function() {
         wireframeMode = this.checked;
@@ -58,6 +68,12 @@
         });
     document.getElementById('windXSlider').addEventListener('input', function(event) {
         windForceV = parseFloat(event.target.value);
+    });
+    document.getElementById('colorBG').addEventListener('input', function(event) {
+        clothColorCG = hexToFloat3(event.target.value);
+    });
+    document.getElementById('colorStripe').addEventListener('input', function(event) {
+        clothColorStripe = hexToFloat3(event.target.value);
     });
     let mIdentity = () => [ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 ];
     
@@ -366,7 +382,7 @@
     precision highp float;
     uniform vec3 uLightPos;
     uniform vec3 uViewPos;
-    uniform vec3 uColor;
+    uniform vec3 uColor,uColorBG,uColorStripe;
     uniform int uLighting;
     uniform int isSphere;
     varying vec3 vPos, vNor,vaPos;
@@ -400,6 +416,13 @@
         }
         return col;
     }
+    float wood(vec2 uv) {
+        float scale = 10.0;
+        float distortion = noise(uv.yxy * scale+.4);
+        float pattern = cos((uv.x + distortion +114.514) * scale);
+        pattern = pattern * 0.5 + 0.5;
+        return distortion;
+    }
 
 
     void main(void) {
@@ -422,38 +445,52 @@
 
         vec3 col = uColor;
         if(isSphere == 0){
-            vec4 lightred = vec4(198.0/255.0, 23.0/255.0, 36.0/255.0, 0.5);
-            vec4 darkRed = vec4(120.0/255.0, 12.0/255.0, 46.0/255.0, 1.0); 
+            vec4 lightred = vec4(uColorBG, 0.5);
+            vec4 darkRed = vec4(uColorStripe, 1.0); 
             vec4 yellow = vec4(185.0/255.0, 166.0/255.0, 59.0/255.0, 1.0);
             vec4 white = vec4(242.0/255.0, 242.0/255.0, 203.0/255.0, 0.1);
             vec4 blue = vec4(5.0/255.0, 77.0/255.0, 175.0/255.0, 0.1); 
             vec4 purp = vec4(42.0/255.0, 1.0/255.0, 56.0/255.0, 0.1); 
-            vec4 pixel = lightred;
-            pixel = mix(pixel, darkRed, knit(vUV, 0.15, 0.0, true));
-            pixel = mix(pixel, white, knit(vUV, 0.01, 0.005, true));
-            pixel = mix(pixel, white, knit(vUV, 0.01, -0.35, false)); 
-            pixel = mix(pixel, purp, knit(vUV, 0.01, -0.4, false)); 
-            pixel = mix(pixel, purp, knit(vUV, 0.01, -0.3, false));
-            pixel = mix(pixel, blue, knit(vUV, 0.02, 0.15, true));
-            pixel = mix(pixel, yellow, knit(vUV, 0.01, 0.05, true));
+            vec4 c = lightred;
+            c = mix(c, darkRed, knit(vUV, 0.15, 0.0, true));
+            c = mix(c, white, knit(vUV, 0.01, 0.005, true));
+            c = mix(c, white, knit(vUV, 0.01, -0.35, false)); 
+            c = mix(c, purp, knit(vUV, 0.01, -0.4, false)); 
+            c = mix(c, purp, knit(vUV, 0.01, -0.3, false));
+            c = mix(c, blue, knit(vUV, 0.02, 0.15, true));
+            c = mix(c, yellow, knit(vUV, 0.01, 0.05, true));
             float stripe = fract( dot(vUV, vec2(75,-60)));
-            pixel = mix(pixel, lightred, stripe);
-            col= pixel.rgb;
+            c = mix(c, lightred, stripe);
+            col= c.rgb;
         }
         else{
             col += max(0.,dot(norm, vec3(0.,0.,1.))*.3);
+           // col*=vec3(1.,.75,.4);
+            col-=wood(vUV)*.53;
         }
         vec3 result = (ambient + diffuse+specular) * col;
+        float a = 1.;
         if(uLighting == 0)
             result = col;
         if(isSphere == 0){
-            result+=noise(vec3(vUV * 5., 1.)) * .1;
+            result+=noise(vec3(vUV * 4., 1.)) * .2;
+            result-=noise(vec3(vUV * 90., 1.)) * .12;
             result = mix(result,result*smoothstep(0.,.1,vUV.x), .1);
+            result = mix(result,result*smoothstep(0.,.03,vUV.x), .5);
             result = mix(result,result*smoothstep(1.,.9,vUV.x), .1);
+            result = mix(result,result*smoothstep(1.,.97,vUV.x), .1);
             result = mix(result,result*smoothstep(0.,.1,vUV.y), .05);
+            result = mix(result,result*smoothstep(0.,.01,vUV.y), .3);
             result = mix(result,result*smoothstep(1.,.9,vUV.y), .05);
+            result = mix(result,result*smoothstep(1.,.99,vUV.y), .3);
+            a = smoothstep(0.,.03,vUV.y)+.5;
         }
-        gl_FragColor = vec4(result, 1.0);
+        else{
+            result-=noise(vec3(vUV * 190., 1.)) * .1;
+        }
+        result = max(vec3(0.), min(vec3(1.), result));
+
+        gl_FragColor = vec4(result, a);
     }
 
     `;
@@ -540,6 +577,8 @@
     let uMatrixLocation = gl.getUniformLocation(gl.program, "uMatrix");
     let uInvMatrixLocation = gl.getUniformLocation(gl.program, "uInvMatrix");
     let uColorLocation = gl.getUniformLocation(gl.program, "uColor");
+    let uColorBGLocation = gl.getUniformLocation(gl.program, "uColorBG");
+    let uColorStripeLocation = gl.getUniformLocation(gl.program, "uColorStripe");
     let uLightPosLocation = gl.getUniformLocation(gl.program, "uLightPos");
     let uLightingLocation = gl.getUniformLocation(gl.program, "uLighting");
     let uSphereLocation = gl.getUniformLocation(gl.program, "isSphere");
@@ -651,7 +690,7 @@
         modelMatrix = mTranslate(sphere.center.x, sphere.center.y, sphere.center.z, modelMatrix);
         modelMatrix = mScale(sphere.radius*.67, sphere.radius, sphere.radius, modelMatrix);
         modelMatrix = mScale(sphereSizeMul,sphereSizeMul,sphereSizeMul,modelMatrix);
-        let color = [.6,.8,.9];
+        let color = [1.,.66,.32];
         let lightPos = [2.5, 2.0,1.0];
         gl.uniform3fv      (uColorLocation    , color);
         gl.uniform3fv      (uLightPosLocation    , lightPos);
@@ -692,6 +731,8 @@
 
         let lightPos = [0.5, 1.0, 3.0];
         gl.uniform3fv      (uColorLocation    , color);
+        gl.uniform3fv      (uColorBGLocation    , clothColorCG);
+        gl.uniform3fv      (uColorStripeLocation    , clothColorStripe);
         gl.uniform3fv      (uLightPosLocation    , lightPos);
         gl.uniformMatrix4fv(uMatrixLocation   , false, m);
         gl.uniformMatrix4fv(uInvMatrixLocation, false, mInverse(m));
