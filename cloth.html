@@ -32,9 +32,9 @@
 <label for="windXSlider">Wind Force:</label>
 <input type="range" id="windXSlider" min="0" max="18" step="0.1" value="0.2">
 <label for="colorBG">Cloth Color:</label>
-<input type="color" id="colorBG" value="#b0454c">
+<input type="color" id="colorBG" value="#df4953">
 <label for="colorStripe">Stripe Color:</label>
-<input type="color" id="colorStripe" value="#780c2e">
+<input type="color" id="colorStripe" value="#a1123f">
 <body bgcolor=orange>
     <center>
     <canvas id='canvas1' width=1500 height=900></canvas>
@@ -44,8 +44,8 @@
     let enableLighting = true;
     let fixBottom = false;
     let sphereSizeMul = 1;
-    let clothColorCG = [176.0/255.0, 69.0/255.0, 76.0/255.0];
-    let clothColorStripe = [120.0/255.0, 12.0/255.0, 46.0/255.0];
+    let clothColorCG = [223.0/255.0, 73.0/255.0, 83.0/255.0];
+    let clothColorStripe = [161.0/255.0, 18.0/255.0, 63.0/255.0];
     function hexToFloat3(hex) {
         hex = hex.slice(1);
         let r = parseInt(hex.slice(0, 2), 16);
